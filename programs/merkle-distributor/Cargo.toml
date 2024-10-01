@@ -24,6 +24,5 @@ cpi = ["no-entrypoint"]
 default = []
 
 [dependencies]
-anchor-lang = ">=0.22, <=0.24"
-anchor-spl = ">=0.22, <=0.24"
-vipers = { version = "^2", features = ["spl-associated-token-account"] }
+anchor-lang = "0.29.0"
+anchor-spl = "0.29.0"
