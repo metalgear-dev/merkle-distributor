@@ -16,7 +16,6 @@
 
 use anchor_lang::{prelude::*, solana_program::pubkey::PUBKEY_BYTES};
 use anchor_spl::token::{self, Mint, Token, TokenAccount};
-use vipers::prelude::*;
 
 pub mod merkle_proof;
 
@@ -31,7 +30,6 @@ pub mod merkle_distributor {
     /// After creating this [MerkleDistributor], the account should be seeded with tokens via its ATA.
     pub fn new_distributor(
         ctx: Context<NewDistributor>,
-        _bump: u8,
         root: [u8; 32],
         max_total_claim: u64,
         max_num_nodes: u64,
@@ -39,7 +37,7 @@ pub mod merkle_distributor {
         let distributor = &mut ctx.accounts.distributor;
 
         distributor.base = ctx.accounts.base.key();
-        distributor.bump = unwrap_bump!(ctx, "distributor");
+        distributor.bump = ctx.bumps.distributor;
 
         distributor.root = root;
         distributor.mint = ctx.accounts.mint.key();
@@ -55,23 +53,21 @@ pub mod merkle_distributor {
     /// Claims tokens from the [MerkleDistributor].
     pub fn claim(
         ctx: Context<Claim>,
-        _bump: u8,
         index: u64,
         amount: u64,
         proof: Vec<[u8; 32]>,
     ) -> Result<()> {
-        assert_keys_neq!(ctx.accounts.from, ctx.accounts.to);
+        assert_ne!(ctx.accounts.from.key(), ctx.accounts.to.key());
 
         let claim_status = &mut ctx.accounts.claim_status;
-        invariant!(
+        require!(
             // This check is redundant, we should not be able to initialize a claim status account at the same key.
             !claim_status.is_claimed && claim_status.claimed_at == 0,
-            DropAlreadyClaimed
+            ErrorCode::DropAlreadyClaimed
         );
 
         let claimant_account = &ctx.accounts.claimant;
         let distributor = &ctx.accounts.distributor;
-        invariant!(claimant_account.is_signer, Unauthorized);
 
         // Verify the merkle proof.
         let node = anchor_lang::solana_program::keccak::hashv(&[
@@ -79,9 +75,9 @@ pub mod merkle_distributor {
             &claimant_account.key().to_bytes(),
             &amount.to_le_bytes(),
         ]);
-        invariant!(
+        require!(
             merkle_proof::verify(proof, distributor.root, node.0),
-            InvalidProof
+            ErrorCode::InvalidProof
         );
 
         // Mark it claimed and send the tokens.
@@ -97,15 +93,6 @@ pub mod merkle_distributor {
             &[ctx.accounts.distributor.bump],
         ];
 
-        #[allow(deprecated)]
-        {
-            vipers::assert_ata!(
-                ctx.accounts.from,
-                ctx.accounts.distributor,
-                distributor.mint
-            );
-        }
-        assert_keys_eq!(ctx.accounts.to.owner, claimant_account.key(), OwnerMismatch);
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -120,16 +107,15 @@ pub mod merkle_distributor {
         )?;
 
         let distributor = &mut ctx.accounts.distributor;
-        distributor.total_amount_claimed =
-            unwrap_int!(distributor.total_amount_claimed.checked_add(amount));
-        invariant!(
+        distributor.total_amount_claimed = distributor.total_amount_claimed.checked_add(amount).unwrap();
+        require!(
             distributor.total_amount_claimed <= distributor.max_total_claim,
-            ExceededMaxClaim
+            ErrorCode::ExceededMaxClaim
         );
-        distributor.num_nodes_claimed = unwrap_int!(distributor.num_nodes_claimed.checked_add(1));
-        invariant!(
+        distributor.num_nodes_claimed = distributor.num_nodes_claimed.checked_add(1).unwrap();
+        require!(
             distributor.num_nodes_claimed <= distributor.max_num_nodes,
-            ExceededMaxNumNodes
+            ErrorCode::ExceededMaxNumNodes
         );
 
         emit!(ClaimedEvent {
@@ -173,7 +159,7 @@ pub struct NewDistributor<'info> {
 
 /// [merkle_distributor::claim] accounts.
 #[derive(Accounts)]
-#[instruction(_bump: u8, index: u64)]
+#[instruction(index: u64)]
 pub struct Claim<'info> {
     /// The [MerkleDistributor].
     #[account(
@@ -197,11 +183,18 @@ pub struct Claim<'info> {
     pub claim_status: Account<'info, ClaimStatus>,
 
     /// Distributor ATA containing the tokens to distribute.
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = from.mint == distributor.mint.key(),
+        constraint = from.owner == distributor.key()
+    )]
     pub from: Account<'info, TokenAccount>,
 
     /// Account to send the claimed tokens to.
-    #[account(mut)]
+    #[account(
+        mut,
+        constraint = from.mint == distributor.mint.key(),
+    )]
     pub to: Account<'info, TokenAccount>,
 
     /// Who is claiming the tokens.
