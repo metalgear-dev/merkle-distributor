@@ -32,7 +32,6 @@ export type CreateDistributorArgs = {
 };
 
 export type PendingDistributor = {
-  bump: number;
   base: PublicKey;
   distributor: PublicKey;
   distributorATA: PublicKey;

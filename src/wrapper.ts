@@ -65,7 +65,6 @@ export class MerkleDistributorWrapper {
     const ixs: TransactionInstruction[] = [];
     ixs.push(
       sdk.program.instruction.newDistributor(
-        bump,
         toBytes32Array(root),
         args.maxTotalClaim,
         args.maxNumNodes,
@@ -92,7 +91,6 @@ export class MerkleDistributorWrapper {
 
     return {
       base: baseKey.publicKey,
-      bump,
       distributor,
       distributorATA: address,
       tx: new TransactionEnvelope(provider, ixs, [baseKey]),
@@ -104,10 +102,9 @@ export class MerkleDistributorWrapper {
     payer: PublicKey
   ): Promise<TransactionInstruction> {
     const { amount, claimant, index, proof } = args;
-    const [claimStatus, bump] = await findClaimStatusKey(index, this.key);
+    const [claimStatus] = await findClaimStatusKey(index, this.key);
 
     return this.program.instruction.claim(
-      bump,
       index,
       amount,
       proof.map((p) => toBytes32Array(p)),
